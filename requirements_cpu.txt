@@ -1,6 +1,6 @@
 torch==2.1.2
 torchaudio==2.1.2
-numpy==1.24.3
+numpy
 librosa==0.10.2.post1
 numba==0.60.0
 scipy==1.14.0
