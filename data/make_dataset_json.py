@@ -24,7 +24,7 @@ def make_json(directory_path, output_file):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--path', default="/Work21/2024/wangjunyu/pythonproject/Data_16k/")
+    parser.add_argument('--path', default="/Users/kaimikkelsen/guitar_noise/data/mamba_guitar_dataset")
 
     args = parser.parse_args()
 

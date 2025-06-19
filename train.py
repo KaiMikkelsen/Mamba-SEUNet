@@ -19,8 +19,9 @@ from torch.nn.parallel import DistributedDataParallel
 from dataloaders.dataloader_vctk import VCTKDemandDataset, Val_Dataset
 from models.stfts import mag_phase_stft, mag_phase_istft
 from models.generator import MambaSEUNet
-from models.loss import pesq_score, phase_losses
-from models.discriminator import MetricDiscriminator, batch_pesq
+from models.loss import sdr_score, phase_losses # <-- CHANGE THIS LINE
+#from models.discriminator import MetricDiscriminator, batch_pesq
+from models.discriminator import MetricDiscriminator, batch_sdr
 from utils.util import (
     load_ckpts, load_optimizer_states, save_checkpoint,
     build_env, load_config, initialize_seed, 
@@ -165,7 +166,8 @@ def train(rank, args, cfg):
     generator.train()
     discriminator.train()
 
-    best_pesq, best_pesq_step = 0.0, 0
+    #best_sdr, best_pesq_step = 0.0, 0
+    best_sdr, best_sdr_step = -float('inf'), 0 # <-- CHANGE THIS LINE
     for epoch in range(max(0, last_epoch), cfg['training_cfg']['training_epochs']):
         if rank == 0:
             start = time.time()
@@ -187,7 +189,8 @@ def train(rank, args, cfg):
 
             audio_g = mag_phase_istft(mag_g, pha_g, n_fft, hop_size, win_size, compress_factor)
             audio_list_r, audio_list_g = list(clean_audio.cpu().numpy()), list(audio_g.detach().cpu().numpy())
-            batch_pesq_score = batch_pesq(audio_list_r, audio_list_g, cfg)
+            #batch_pesq_score = batch_pesq(audio_list_r, audio_list_g, cfg)
+            batch_sdr_score = batch_sdr(audio_list_r, audio_list_g)
 
             # Discriminator
             # ------------------------------------------------------- #
@@ -196,11 +199,16 @@ def train(rank, args, cfg):
             metric_g = discriminator(clean_mag, mag_g.detach())
             loss_disc_r = F.mse_loss(one_labels, metric_r.flatten())
             
-            if batch_pesq_score is not None:
-                loss_disc_g = F.mse_loss(batch_pesq_score.to(device), metric_g.flatten())
+            # if batch_pesq_score is not None:
+            #     loss_disc_g = F.mse_loss(batch_pesq_score.to(device), metric_g.flatten())
+            # else:
+            #     loss_disc_g = 0
+            if batch_sdr_score is not None:
+                loss_disc_g = F.mse_loss(batch_sdr_score.to(device), metric_g.flatten())
             else:
-                loss_disc_g = 0
-            
+                loss_disc_g = 0 # Fallback, should not happen
+
+
             loss_disc_all = loss_disc_r + loss_disc_g
             
             loss_disc_all.backward()
@@ -394,10 +402,11 @@ def train(rank, args, cfg):
                         val_mag_err = val_mag_err_tot / (j+1)
                         val_pha_err = val_pha_err_tot / (j+1)
                         val_com_err = val_com_err_tot / (j+1)
-                        val_pesq_score = pesq_score(audios_r, audios_g, cfg).item()
+                        #val_pesq_score = pesq_score(audios_r, audios_g, cfg).item()
+                        val_sdr_score = sdr_score(audios_r, audios_g).mean().item()
                         print('Steps : {:d}, PESQ Score: {:4.3f}, s/b : {:4.3f}'.
-                                format(steps, val_pesq_score, time.time() - start_b))
-                        sw.add_scalar("Validation/PESQ Score", val_pesq_score, steps)
+                                format(steps, val_sdr_score, time.time() - start_b))
+                        sw.add_scalar("Validation/PESQ Score", val_sdr_score, steps)
                         sw.add_scalar("Validation/Magnitude Loss", val_mag_err, steps)
                         sw.add_scalar("Validation/Phase Loss", val_pha_err, steps)
                         sw.add_scalar("Validation/Complex Loss", val_com_err, steps)
@@ -405,10 +414,10 @@ def train(rank, args, cfg):
                     generator.train()
 
                     # Print best validation PESQ score in terminal
-                    if val_pesq_score >= best_pesq:
-                        best_pesq = val_pesq_score
-                        best_pesq_step = steps
-                    print(f"valid: PESQ {val_pesq_score}, Mag_loss {val_mag_err}, Phase_loss {val_pha_err}. Best_PESQ: {best_pesq} at step {best_pesq_step}")
+                    if val_sdr_score >= best_sdr:
+                        best_sdr = val_sdr_score
+                        best_sdr_step = steps
+                    print(f"valid: SDR {val_sdr_score}, Mag_loss {val_mag_err}, Phase_loss {val_pha_err}. Best_SDR: {best_sdr} at step {best_sdr_step}")
 
             steps += 1
 

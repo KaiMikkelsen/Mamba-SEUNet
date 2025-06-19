@@ -4,6 +4,9 @@ import torch.nn as nn
 import numpy as np
 from pesq import pesq
 from joblib import Parallel, delayed
+import numpy as np # ADD THIS LINE
+import mir_eval.separation # ADD THIS LINE
+
 
 def phase_losses(phase_r, phase_g, cfg):
     """
@@ -99,46 +102,86 @@ def compute_stft(y: torch.Tensor, n_fft: int, hop_size: int, win_size: int, cent
     
     return mag, pha, com
 
-def pesq_score(utts_r, utts_g, cfg):
-    """
-    Calculate PESQ (Perceptual Evaluation of Speech Quality) score for pairs of reference and generated utterances.
+# def pesq_score(utts_r, utts_g, cfg):
+#     """
+#     Calculate PESQ (Perceptual Evaluation of Speech Quality) score for pairs of reference and generated utterances.
     
-    Args:
-        utts_r (list of torch.Tensor): List of reference utterances.
-        utts_g (list of torch.Tensor): List of generated utterances.
-        h (object): Configuration object containing parameters like sampling_rate.
+#     Args:
+#         utts_r (list of torch.Tensor): List of reference utterances.
+#         utts_g (list of torch.Tensor): List of generated utterances.
+#         h (object): Configuration object containing parameters like sampling_rate.
     
-    Returns:
-        float: Mean PESQ score across all pairs of utterances.
-    """
-    def eval_pesq(clean_utt, esti_utt, sr):
-        """
-        Evaluate PESQ score for a single pair of clean and estimated utterances.
+#     Returns:
+#         float: Mean PESQ score across all pairs of utterances.
+#     """
+#     def eval_pesq(clean_utt, esti_utt, sr):
+#         """
+#         Evaluate PESQ score for a single pair of clean and estimated utterances.
         
-        Args:
-            clean_utt (np.ndarray): Clean reference utterance.
-            esti_utt (np.ndarray): Estimated generated utterance.
-            sr (int): Sampling rate.
+#         Args:
+#             clean_utt (np.ndarray): Clean reference utterance.
+#             esti_utt (np.ndarray): Estimated generated utterance.
+#             sr (int): Sampling rate.
         
-        Returns:
-            float: PESQ score or -1 in case of an error.
-        """
-        try:
-            pesq_score = pesq(sr, clean_utt, esti_utt)
-        except Exception as e:
-            # Error can happen due to silent period or other issues
-            print(f"Error computing PESQ score: {e}")
-            pesq_score = -1
-        return pesq_score
+#         Returns:
+#             float: PESQ score or -1 in case of an error.
+#         """
+#         try:
+#             pesq_score = pesq(sr, clean_utt, esti_utt)
+#         except Exception as e:
+#             # Error can happen due to silent period or other issues
+#             print(f"Error computing PESQ score: {e}")
+#             pesq_score = -1
+#         return pesq_score
     
-    # Parallel processing of PESQ score computation
-    pesq_scores = Parallel(n_jobs=30)(delayed(eval_pesq)(
-        utts_r[i].squeeze().cpu().numpy(),
-        utts_g[i].squeeze().cpu().numpy(),
-        cfg['stft_cfg']['sampling_rate']
-    ) for i in range(len(utts_r)))
+#     # Parallel processing of PESQ score computation
+#     pesq_scores = Parallel(n_jobs=30)(delayed(eval_pesq)(
+#         utts_r[i].squeeze().cpu().numpy(),
+#         utts_g[i].squeeze().cpu().numpy(),
+#         cfg['stft_cfg']['sampling_rate']
+#     ) for i in range(len(utts_r)))
     
-    # Calculate mean PESQ score
-    pesq_score = np.mean(pesq_scores)
-    return pesq_score
+#     # Calculate mean PESQ score
+#     pesq_score = np.mean(pesq_scores)
+#     return pesq_score
 
+def sdr_score(references: torch.Tensor, estimates: torch.Tensor) -> torch.Tensor:
+    """
+    Compute Signal-to-Distortion Ratio (SDR) for one or more audio tracks using PyTorch.
+
+    SDR is a measure of how well the predicted source (estimate) matches the reference source.
+    It is calculated as the ratio of the energy of the reference signal to the energy of the error (difference between reference and estimate).
+    Return SDR in decibels (dB)
+
+    Parameters:
+    ----------
+    references : torch.Tensor
+        A torch.Tensor of shape (batch_size, num_channels, num_samples), where batch_size is the number of sources,
+        num_channels is the number of channels (e.g., 1 for mono), and num_samples is the length of the audio signal.
+
+    estimates : torch.Tensor
+        A torch.Tensor of shape (batch_size, num_channels, num_samples) representing the estimated sources.
+
+    Returns:
+    -------
+    torch.Tensor
+        A 1D torch.Tensor containing the SDR values for each source in the batch (shape: batch_size,).
+    """
+    eps = 1e-8  # to avoid numerical errors
+
+    # Sum of squares along channel and sample dimensions for references
+    # Resulting shape will be (batch_size,)
+    num = torch.sum(torch.square(references), dim=(1, 2))
+
+    # Sum of squares of error along channel and sample dimensions
+    # Resulting shape will be (batch_size,)
+    den = torch.sum(torch.square(references - estimates), dim=(1, 2))
+
+    # Add epsilon to numerator and denominator to prevent division by zero or log(0)
+    num = num + eps
+    den = den + eps
+
+    # Calculate 10 * log10(num / den)
+    sdr_values = 10 * torch.log10(num / den)
+
+    return sdr_values
