@@ -8,7 +8,7 @@ tensorboard
 SoundFile
 einops
 joblib
-pesq
+#pesq
 mamba-ssm
 pyyaml
 mireval
